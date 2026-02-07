@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MUTANDA TRADERS | Premium Quality Products</title>
+    <link rel="icon" type="image/png" href="icons/icon-96.png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Firebase SDK -->
     <script type="module">
@@ -2519,6 +2521,15 @@ let selectedSize = null;
 let selectedColor = null;
 let searchTimeout = null;
 
+// Disable PWA: Unregister any existing service workers
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(registrations) {
+        for(let registration of registrations) {
+            registration.unregister();
+        }
+    });
+}
+
 // Initialize the app
 document.addEventListener('DOMContentLoaded', function() {
     loadProductsFromFirestore();
@@ -2620,6 +2631,7 @@ function displayProducts() {
                     <img src="${productImage}" 
                          alt="${product.name}" 
                          class="product-image"
+                         loading="lazy"
                          onerror="this.src='${getPlaceholderImage(product.category)}'">
                     <div class="quick-view-overlay" onclick="event.stopPropagation(); viewProduct('${product.id}')">
                         <span class="quick-view-text">
@@ -2696,7 +2708,7 @@ function searchProducts(searchTerm) {
                 
                 return `
                     <div class="search-item" onclick="viewProduct('${product.id}'); document.getElementById('searchResults').classList.remove('active');">
-                        <img src="${image}" alt="${product.name}" class="search-item-image" onerror="this.src='${getPlaceholderImage('General')}'">
+                        <img src="${image}" alt="${product.name}" class="search-item-image" loading="lazy" onerror="this.src='${getPlaceholderImage('General')}'">
                         <div class="search-item-info">
                             <div class="search-item-name">${product.name}</div>
                             <div class="search-item-price">UGX ${formatUGX(price)}</div>
@@ -3101,7 +3113,7 @@ function updateCartDisplay() {
             
             return `
                 <div class="cart-item">
-                    <img src="${item.image}" alt="${item.name}" class="cart-item-image" onerror="this.src='${getPlaceholderImage('General')}'">
+                    <img src="${item.image}" alt="${item.name}" class="cart-item-image" loading="lazy" onerror="this.src='${getPlaceholderImage('General')}'">
                     <div class="cart-item-info">
                         <div class="cart-item-name">${item.name}</div>
                         ${specsHtml ? `<div class="cart-item-specs">${specsHtml}</div>` : ''}
@@ -3324,26 +3336,55 @@ function closeZoom() {
 
 // Send WhatsApp notification via backend webhook
 async function sendWhatsAppNotification(orderData) {
-    const webhookUrl = 'http://localhost:3000/send-whatsapp'; // IMPORTANT: Replace with your production webhook URL
+    // Twilio Configuration
+    const accountSid = 'AC10091923685d248d39154165106691d4';
+    const authToken = '0a740df7c6d2bad1001a9e9b514bb3d9'.trim();
+    const fromNumber = 'whatsapp:+14155238886';
+    const toNumber = 'whatsapp:+256782864711';
+
+    // Construct the message body with order details
+    const itemsList = orderData.products.map(p => `${p.quantity}x ${p.name}`).join('\n');
+    const messageBody = `*New Order Received!* 📦\n\n` +
+        `*Order ID:* ${orderData.orderId}\n` +
+        `*Customer:* ${orderData.customerName}\n` +
+        `*Phone:* ${orderData.phone}\n` +
+        `*Total:* UGX ${new Intl.NumberFormat('en-UG').format(orderData.totalPrice)}\n` +
+        `*Payment:* ${orderData.paymentMethod}\n\n` +
+        `*Items:*\n${itemsList}`;
+
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+    const formData = new URLSearchParams();
+    formData.append('To', toNumber);
+    formData.append('From', fromNumber);
+    formData.append('Body', messageBody);
 
     try {
-        const response = await fetch(webhookUrl, {
+        const response = await fetch(url, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + btoa(accountSid + ':' + authToken),
+                'Content-Type': 'application/x-www-form-urlencoded'
             },
-            body: JSON.stringify(orderData),
+            body: formData
         });
 
-        const result = await response.json();
-
-        if (response.ok && result.success) {
-            console.log('✅ WhatsApp notification sent successfully via webhook:', result.messageSid);
+        if (response.ok) {
+            const result = await response.json();
+            console.log('✅ WhatsApp notification sent successfully:', result.sid);
+            showToast('WhatsApp notification sent!', 'success');
         } else {
-            console.error('❌ Failed to send WhatsApp notification via webhook:', result.error, result.details);
+            const error = await response.json();
+            console.error('❌ Failed to send WhatsApp notification:', JSON.stringify(error));
+            showToast('Twilio Error: ' + (error.message || error.code || 'Unauthorized'), 'error');
         }
     } catch (error) {
-        console.error('❌ Error calling WhatsApp webhook:', error);
+        console.error('❌ Error sending WhatsApp notification:', error);
+        if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+            showToast('WhatsApp Error: Browser blocked request (CORS)', 'error');
+            console.warn('⚠️ CORS Error: Browsers block direct Twilio API calls. You may need a backend or a browser extension to test this.');
+        } else {
+            showToast('Error sending WhatsApp: ' + error.message, 'error');
+        }
     }
 }
 
@@ -3552,4 +3593,5 @@ function showError(selector, message) {
         window.removeFromCart = removeFromCart;
     </script>
 </body>
+</html>
 </html>
